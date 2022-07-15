@@ -1,4 +1,7 @@
+use futures::stream::BoxStream;
+use futures::TryStreamExt;
 use sqlx::Sqlite;
+use sqlx_core::sqlite::SqliteConnection;
 use sqlx_test::new;
 
 #[sqlx_macros::test]
@@ -84,6 +87,46 @@ async fn macro_select_bind() -> anyhow::Result<()> {
     assert_eq!(1, account.id);
     assert_eq!("Herp Derpinson", account.name);
     assert_eq!(account.is_active, Some(true));
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn macro_select_bind_reference() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    let id = 1i32;
+
+    #[derive(sqlx::FromRow, Debug)]
+    pub struct Row {
+        id: i64,
+        name: String,
+        is_active: Option<bool>,
+    }
+
+    fn returns_box_stream<'i, 'c: 'i>(
+        conn: &'c mut SqliteConnection,
+        id_ref: &'i i32,
+    ) -> BoxStream<'i, Result<Row, sqlx::Error>> {
+        sqlx::query_as!(
+            Row,
+            "select id, name, is_active from accounts where id = ?",
+            &id_ref
+        )
+        .fetch(conn)
+    };
+
+    let mut stream = returns_box_stream(&mut conn, &id);
+    let mut found = 0;
+    while let Some(ref account) = stream.try_next().await.unwrap() {
+        found += 1;
+
+        assert_eq!(1, account.id);
+        assert_eq!("Herp Derpinson", account.name);
+        assert_eq!(account.is_active, Some(true));
+    }
+
+    assert_eq!(found, 1);
 
     Ok(())
 }
