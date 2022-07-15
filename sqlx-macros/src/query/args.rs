@@ -2,10 +2,10 @@ use crate::database::DatabaseExt;
 use crate::query::QueryMacroInput;
 use either::Either;
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote, quote_spanned};
+use quote::{format_ident, quote, quote_spanned, ToTokens};
 use sqlx_core::describe::Describe;
 use syn::spanned::Spanned;
-use syn::{Expr, ExprCast, ExprGroup, ExprType, Type};
+use syn::{Expr, ExprCast, ExprGroup, ExprReference, ExprType, Type};
 
 /// Returns a tokenstream which typechecks the arguments passed to the macro
 /// and binds them to `DB::Arguments` with the ident `query_args`.
@@ -26,10 +26,10 @@ pub fn quote_args<DB: DatabaseExt>(
         .collect::<Vec<_>>();
 
     let arg_name = &arg_names;
-    let arg_expr = input.arg_exprs.iter().cloned().map(strip_wildcard);
+    let arg_expr = input.arg_exprs.iter().cloned().map(to_references);
 
     let arg_bindings = quote! {
-        #(let #arg_name = &(#arg_expr);)*
+        #(let #arg_name = #arg_expr ;)*
     };
 
     let args_check = match info.parameters() {
@@ -120,6 +120,16 @@ fn get_type_override(expr: &Expr) -> Option<&Type> {
         Expr::Cast(cast) => Some(&cast.ty),
         Expr::Type(ascription) => Some(&ascription.ty),
         _ => None,
+    }
+}
+
+fn to_references(expr: Expr) -> TokenStream {
+    let expr = strip_wildcard(expr);
+    match expr {
+        // Remove a reference if its already a reference
+        Expr::Reference(ExprReference { expr, .. }) => expr.into_token_stream(),
+        // Convert to a reference if its not already a reference
+        _ => quote! { &(#expr) },
     }
 }
 
